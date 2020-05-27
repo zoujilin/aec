@@ -8648,7 +8648,6 @@ const q31_t twiddleCoef_64_q31[96] = {
 	(q31_t)0xDAD7F3A2, (q31_t)0x8582FAA4, (q31_t)0xE70747C3,
 	(q31_t)0x8275A0C0, (q31_t)0xF3742CA1, (q31_t)0x809DC970
 };
-#if 0
 /**
 * \par
 * Example code for Q31 Twiddle factors Generation::
@@ -8882,6 +8881,7 @@ const q31_t twiddleCoef_256_q31[384] = {
 	(q31_t)0xF6956FB6, (q31_t)0x8058C94C, (q31_t)0xF9B82683,
 	(q31_t)0x80277872, (q31_t)0xFCDBD541, (q31_t)0x8009DE7D
 };
+#if 0
 
 /**
 * \par
@@ -17135,7 +17135,7 @@ const uint16_t armBitRevIndexTable_fixed_64[ARMBITREVINDEXTABLE_FIXED_64_TABLE_L
    112,224, 120,480, 136,272, 152,400, 168,336, 176,208, 184,464, 200,304, 216,432,
    232,368, 248,496, 280,392, 296,328, 312,456, 344,424, 376,488, 440,472
 };
-#if 0
+
 const uint16_t armBitRevIndexTable_fixed_128[ARMBITREVINDEXTABLE_FIXED_128_TABLE_LENGTH] =
 {
    /* 4x2, size 112 */
@@ -17165,7 +17165,7 @@ const uint16_t armBitRevIndexTable_fixed_256[ARMBITREVINDEXTABLE_FIXED_256_TABLE
    1368,1704, 1384,1448, 1400,1960, 1432,1640, 1464,1896, 1496,1768, 1528,2024, 1592,1816,
    1624,1688, 1656,1944, 1720,1880, 1784,2008, 1912,1976
 };
-
+#if 0
 const uint16_t armBitRevIndexTable_fixed_512[ARMBITREVINDEXTABLE_FIXED_512_TABLE_LENGTH] =
 {
    /* 4x2, size 480 */

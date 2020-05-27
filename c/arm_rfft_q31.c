@@ -71,11 +71,13 @@ void arm_split_rifft_q31(
 * \par
 * \image html RIFFTQ31.gif "Input and Output Formats for Q31 RIFFT"
 */
+int fft_n = 0;
 void arm_rfft_q31(
     const arm_rfft_instance_q31 * S,
     q31_t * pSrc,
     q31_t * pDst)
 {
+//fft_n++;
     const arm_cfft_instance_q31 *S_CFFT = S->pCfft;
     uint32_t i;
     uint32_t L2 = S->fftLenReal >> 1;

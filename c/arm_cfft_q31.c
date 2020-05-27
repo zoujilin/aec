@@ -101,7 +101,6 @@ void arm_bitreversal_32c (uint32_t * pSrc, const uint16_t bitRevLen,
 * @param[in]     bitReverseFlag flag that enables (bitReverseFlag=1) or disables (bitReverseFlag=0) bit reversal of output.
 * @return none.
 */
-int fft_n = 0;
 void arm_cfft_q31(
     const arm_cfft_instance_q31 * S,
     q31_t * p1,
@@ -109,7 +108,7 @@ void arm_cfft_q31(
     uint8_t bitReverseFlag)
 {
     uint32_t L = S->fftLen;
-fft_n++;
+
     if (ifftFlag == 1U)
     {
         switch (L)

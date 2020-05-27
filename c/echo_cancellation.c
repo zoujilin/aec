@@ -59,7 +59,7 @@
 #endif
 
 #if defined(WEBRTC_UNTRUSTED_DELAY) && defined(WEBRTC_MAC)
-static const int kDelayDiffOffsetSamples = -256;
+static const int kDelayDiffOffsetSamples = -160;
 #else
 // Not enabled for now.
 static const int kDelayDiffOffsetSamples = 0;
@@ -110,11 +110,12 @@ Aec Aecstruct;
 
 void* WebRtcAec_Create() {
   Aec* aecpc = &Aecstruct;
-
-
+int aecsize = sizeof(Aecstruct);
+int AecCoresize = sizeof(AecCorestruct);
   //aecpc->data_dumper.reset(new ApmDataDumper(aecpc->instance_count));
     //aecpc->instance_count=0;
   aecpc->aec = WebRtcAec_CreateAec();
+  aecpc->aec = &AecCorestruct;
   if (!aecpc->aec) {
     WebRtcAec_Free(aecpc);
     return NULL;
@@ -168,9 +169,9 @@ int32_t WebRtcAec_Init(void* aecInst, int32_t sampFreq, int32_t scSampFreq) {
     return AEC_BAD_PARAMETER_ERROR;
   }
   aecpc->scSampFreq = scSampFreq;
-
+AecCore* core = aecpc->aec;
   // Initialize echo canceller core
-  if (WebRtcAec_InitAec(aecpc->aec, aecpc->sampFreq) == -1) {
+  if (WebRtcAec_InitAec(core, aecpc->sampFreq) == -1) {
     return AEC_UNSPECIFIED_ERROR;
   }
 
@@ -554,9 +555,11 @@ static int ProcessNormal(Aec* aecInst,
     }
   }
 #endif
-  nBlocks10ms = num_samples / (FRAME_LEN * aecInst->rate_factor);
-if (0) {
-  // if (aecInst->startup_phase) {
+
+  #if 0
+    nBlocks10ms = num_samples / (FRAME_LEN * aecInst->rate_factor);
+
+  if (aecInst->startup_phase) {
     for (i = 0; i < num_bands; ++i) {
       // Only needed if they don't already point to the same place.
       if (nearend[i] != out[i]) {
@@ -634,9 +637,11 @@ if (0) {
         aecInst->startup_phase = 0;
       }
     }
-  } else {
+  } else
+  #endif
+  {
     // AEC is enabled.
-    // EstBufDelayNormal(aecInst);
+    //EstBufDelayNormal(aecInst);
 
     // Call the AEC.
     // TODO(bjornv): Re-structure such that we don't have to pass
@@ -678,8 +683,8 @@ static void ProcessExtended(Aec* self,
                           : reported_delay_ms;
 #endif
   self->msInSndCardBuf = reported_delay_ms;
-if (0) {
-  // if (!self->farend_started) {
+
+  if (!self->farend_started) {
     for (i = 0; i < num_bands; ++i) {
       // Only needed if they don't already point to the same place.
       if (nearend[i] != out[i]) {
@@ -688,7 +693,8 @@ if (0) {
     }
     return;
   }
-  if (self->startup_phase) {
+  if (0) {
+  // if (self->startup_phase) {
     // In the extended mode, there isn't a startup "phase", just a special
     // action on the first frame. In the trusted delay case, we'll take the
     // current reported delay, unless it's less then our conservative
@@ -710,7 +716,7 @@ if (0) {
     self->startup_phase = 0;
   }
 
-  // EstBufDelayExtended(self);
+  //EstBufDelayExtended(self);
 
   {
     // |delay_diff_offset| gives us the option to manually rewind the delay on
@@ -723,7 +729,7 @@ if (0) {
                             adjusted_known_delay, out);
   }
 }
-
+#if 0
 static void EstBufDelayNormal(Aec* aecInst) {
   int nSampSndCard = aecInst->msInSndCardBuf * sampMsNb * aecInst->rate_factor;
   int current_delay = nSampSndCard - WebRtcAec_system_delay(aecInst->aec);
@@ -775,10 +781,10 @@ static void EstBufDelayNormal(Aec* aecInst) {
   aecInst->lastDelayDiff = delay_difference;
 
   if (aecInst->timeForDelayChange > 25) {
-    aecInst->knownDelay = WEBRTC_SPL_MAX((int)aecInst->filtDelay - 256, 0);
+    aecInst->knownDelay = WEBRTC_SPL_MAX((int)aecInst->filtDelay - 160, 0);
   }
 }
-
+#endif
 static void EstBufDelayExtended(Aec* aecInst) {
   int reported_delay =
       aecInst->msInSndCardBuf * sampMsNb * aecInst->rate_factor;

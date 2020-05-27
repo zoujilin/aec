@@ -4246,15 +4246,16 @@ arm_status arm_rfft_init_q31(
         S->twidCoefRModifier = 8U;
         S->pCfft = &arm_cfft_sR_q31_len512;
         break;
-    case 512U:
-        S->twidCoefRModifier = 16U;
-        S->pCfft = &arm_cfft_sR_q31_len256;
-        break;
+    
     case 256U:
         S->twidCoefRModifier = 32U;
         S->pCfft = &arm_cfft_sR_q31_len128;
         break;
     #endif    
+    case 512U:
+        S->twidCoefRModifier = 16U;
+        S->pCfft = &arm_cfft_sR_q31_len256;
+        break;
     case 128U:
         S->twidCoefRModifier = 64U;
         S->pCfft = &arm_cfft_sR_q31_len64;

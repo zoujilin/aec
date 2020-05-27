@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#if 0//#ifdef CORE_M3
+#ifdef CORE_M3
 //#ifdef __cplusplus
 //extern "C" {
 #include "ring_buffer.h"
@@ -26,7 +26,7 @@
 #include "iet_gpio.h"
 #include "iet_uart.h"
 #include "iet_vpu.h"
-#include "vpu_control.h"
+//#include "vpu_control.h"
 //}
 //#endif
 #else
@@ -86,8 +86,8 @@ typedef struct Stats {
 // to be used in array declarations, as it represents the maximum filter length.
 //enum { kExtendedNumPartitions = 32 };
 //enum { kExtendedNumPartitions = 40 };
-enum { kExtendedNumPartitions = 12 };
-static const int kNormalNumPartitions = 12;
+enum { kExtendedNumPartitions = 18 };//delay =kExtendedNumPartitions * 4ms=4*4=16ms
+static const int kNormalNumPartitions = 18;
 
 //static const int kNormalNumPartitions = 32;
 

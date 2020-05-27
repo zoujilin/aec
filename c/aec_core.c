@@ -31,17 +31,16 @@ static int32_t aecnearq = -31;
 //static int32_t aecsq = aecq0;
 //static int32_t init_flag_q = 0;
 
-
-//#include "iet_systick.h"
-//#include "BACH.h"
-//#include "iet_timer.h"
-//#include "iet_uart.h"
-//extern volatile unsigned long SysTickCnt_test;
+#ifdef CORE_M3
+#include "iet_systick.h"
+#include "BACH.h"
+#include "iet_timer.h"
+#include "iet_uart.h"
+extern volatile unsigned long SysTickCnt_test;
 uint32_t start0;
-
+#endif
 extern  AecCore AecCorestruct;
 extern  Aec Aecstruct;
-
 #include "arm_math.h"
 #include "arm_common_tables.h"
 #include "arm_const_structs.h"
@@ -49,15 +48,18 @@ extern  Aec Aecstruct;
 uint32_t start;
 
 //#define HARD_FFT
+//#define INT_MODE
+
 #ifdef HARD_FFT
+#include "iet_fft.h"
 FFT_RorW_TypeDef fft_struct;
 uint32_t ecrd;
-int32_t g_fft_buf[128*2*2]  __attribute__((aligned(16)))={0};//real,imag
-#else
+int32_t g_fft_buf[512*2*2]  __attribute__((aligned(16)))={0};//real,imag
+//#else
+
+#endif
 arm_rfft_instance_q31  S_fft128;
 arm_rfft_instance_q31  S_ifft128;
-#endif
-
 static uint32_t IncreaseSeed(uint32_t* seed) {
   seed[0] = (seed[0] * ((int32_t)69069) + 1) & (kMaxSeedUsed - 1);
   return seed[0];
@@ -182,9 +184,10 @@ static const int kTargetSupp[3] = {-231525581, -385875968, -617401549};//Q25
 // Two sets of parameters, one for the extended filter mode.
 static const int kExtendedMinOverDrive[3] = {1536, 3072, 7680};//Q9
 static const int kNormalMinOverDrive[3] = {512, 1024, 2560};
-const int WebRtcAec_kExtendedSmoothingCoefficients[2][2] = {{14746, 1638},{15073, 1311}};//{{0.9f, 0.1f},{0.92f, 0.08f}}; //Q14
-const int WebRtcAec_kNormalSmoothingCoefficients[2][2] =   {{14746, 1638},{15237, 1147}};//{{0.9f, 0.1f},{0.93f, 0.07f}};
-
+const long long WebRtcAec_kExtendedSmoothingCoefficients[2][2] = {{7373, 819},{7537, 655}};//{{0.9f, 0.1f},{0.92f, 0.08f}}; //Q13
+const long long WebRtcAec_kNormalSmoothingCoefficients[2][2] =   {{7373, 819},{7619, 573}};//{{0.9f, 0.1f},{0.93f, 0.07f}};
+const float fWebRtcAec_kExtendedSmoothingCoefficients[2][2] = {{0.9f, 0.1f},{0.92f, 0.08f}}; //Q13
+const float fWebRtcAec_kNormalSmoothingCoefficients[2][2] =   {{0.9f, 0.1f},{0.93f, 0.07f}};
 // Number of partitions forming the NLP's "preferred" bands.
 enum { kPrefBandSize = 24 };
 
@@ -219,12 +222,9 @@ ExtractExtendedBlock(int32_t extended_block[PART_LEN2]) {
   extend_ptr = (int32_t *)&extended_block[0];
   size_t read_elements = WebRtc_ReadBuffer(
       buffer_, (void**)(&block_ptr),extend_ptr, 1);  
-      #if 0
   if (read_elements == 0u) {
-    std::fill_n(&extended_block[0], PART_LEN, 0);
-  } else 
-  #endif
-  if (block_ptr != extend_ptr) {
+    memset(&extended_block[0], 0, PART_LEN);
+  } else if (block_ptr != extend_ptr) {
     #if 1
     for(int i=0; i<PART_LEN; i++)
     {
@@ -240,17 +240,9 @@ ExtractExtendedBlock(int32_t extended_block[PART_LEN2]) {
   read_elements =
       WebRtc_ReadBuffer(buffer_, (void**)(&block_ptr),
                         extend_ptr, 1);
-  for(int i=0; i<PART_LEN; i++)
-  {
-      extended_block[PART_LEN+i] = extend_ptr[i];
-  }      
-  //WebRtc_ReadBuffer(buffer_, reinterpret_cast<void**>(&block_ptr), intbuf, 1);
-  #if 0
   if (read_elements == 0u) {
-    std::fill_n(&extended_block[PART_LEN], PART_LEN, 0);
-  } else 
-  #endif
-  if (block_ptr != extend_ptr) {
+    memset(&extended_block[PART_LEN], 0, PART_LEN);
+  } else if (block_ptr != extend_ptr) {
     #if 1
     for(int i=0; i<PART_LEN; i++)
     {
@@ -322,19 +314,20 @@ static int CmpFloat(const void* a, const void* b) {
   return (*da - *db);
 }
 #ifdef HARD_FFT
+#define FFTN 128 //128 512
 void hard_rfft_comp(int fft_flag, int *fftin, int *fftout)
 {
     //in:先x1(n)的128点，再x2(n)的128点. result: 先x1(n)的复数65点，再x2(n)的复数65点
     if(fft_flag == 0)//fft
     {
         fft_struct.addr = &g_fft_buf[0];	
-    	fft_struct.len = 128 * 2;
+    	fft_struct.len = FFTN * 2;
     	#if 1
-    	for(int j = 0; j < 128; j++)
+    	for(int j = 0; j < FFTN; j++)
         {
     		int k=j<<1;
     		g_fft_buf[k] = fftin[j];
-    		g_fft_buf[k+1] = fftin[128+j];
+    		g_fft_buf[k+1] = fftin[FFTN+j];
         }	
         #endif
         ecrd = iet_fft_init(FFT_POLL);
@@ -357,17 +350,18 @@ void hard_rfft_comp(int fft_flag, int *fftin, int *fftout)
 	    }
 
 	    fftout[0] = g_fft_buf[0];           fftout[1] = 0;
-	    fftout[130+0] = g_fft_buf[1];       fftout[130+1] = 0;
-	    fftout[128] = g_fft_buf[128+1];     fftout[128+1] = 0;
-	    fftout[130+128] = g_fft_buf[128+1]; fftout[130+128+1] = 0;
-	    for(int j = 1; j < 63; j++)
+	    fftout[FFTN+2+0] = g_fft_buf[1];       fftout[FFTN+2+1] = 0;
+	    fftout[FFTN] = g_fft_buf[FFTN+1];     fftout[FFTN+1] = 0;
+	    fftout[FFTN+2+FFTN] = g_fft_buf[FFTN+1]; fftout[FFTN+2+FFTN+1] = 0;
+	    for(int j = 1; j < FFTN/2; j++)
         {
             int k=j<<1;
-    		fftout[k] =   (g_fft_buf[k] + g_fft_buf[256-k])>>1;
-    		fftout[k+1] = (g_fft_buf[k+1] - g_fft_buf[256-k+1])>>1;
+    		fftout[k] =   (g_fft_buf[k] + g_fft_buf[FFTN*2-k])>>1;
+    		fftout[k+1] = (g_fft_buf[k+1] - g_fft_buf[FFTN*2-k+1])>>1;
 
-    		fftout[130+k] =   (g_fft_buf[k+1] + g_fft_buf[256-k+1])>>1;
-    		fftout[130+k+1] = (g_fft_buf[k] - g_fft_buf[256-k])>>1;
+    		fftout[FFTN+2+k] =   (g_fft_buf[k+1] + g_fft_buf[FFTN*2-k+1])>>1;
+    		//fftout[FFTN+2+k+1] = (g_fft_buf[k] - g_fft_buf[FFTN*2-k])>>1;//公式是否漏了负号
+    		fftout[FFTN+2+k+1] = (g_fft_buf[FFTN*2-k] - g_fft_buf[k])>>1;
         }
     }
     
@@ -375,22 +369,22 @@ void hard_rfft_comp(int fft_flag, int *fftin, int *fftout)
     else if(fft_flag == 1)//ifft 
     {
         fft_struct.addr = &g_fft_buf[0];	
-    	fft_struct.len = 128 * 2;
+    	fft_struct.len = FFTN * 2;
 
-    	for(int j = 0; j < 65; j++)
+    	for(int j = 0; j < FFTN/2+1; j++)
     	{
     	    int k=j<<1;
-    	    g_fft_buf[k] = fftin[k]-fftin[130+k+1];
-    	    g_fft_buf[k+1] = fftin[k+1]-fftin[130+k];
+    	    g_fft_buf[k] = fftin[k]-fftin[FFTN+2+k+1];
+    	    g_fft_buf[k+1] = fftin[k+1]+fftin[FFTN+2+k];
     	}
-    	for(int j = 65; j < 128; j++)
+    	for(int j = FFTN/2+1; j < FFTN; j++)
     	{
             int k=j<<1;
-            g_fft_buf[k] = g_fft_buf[256-k];
-            g_fft_buf[k+1] = -g_fft_buf[256-k+1];
+            g_fft_buf[k] = fftin[(FFTN-j)*2]+fftin[FFTN+2+(FFTN-j)*2+1];//注意，数据后半段不能直接取共轭
+            g_fft_buf[k+1] = -fftin[(FFTN-j)*2+1]+fftin[FFTN+2+(FFTN-j)*2];
          }
         
-        ecrd = iet_ifft_init(FFT_POLL);
+        ecrd = iet_fft_init(FFT_POLL);
         if(ecrd != 0)
         {
             iet_printf_err("ifft_poll iet_fft_init = 0x%x\r\n", ecrd);
@@ -400,7 +394,7 @@ void hard_rfft_comp(int fft_flag, int *fftin, int *fftout)
         {
             iet_printf_err("ifft_poll FFT_CMD_WRITE = 0x%x\r\n", ecrd);
         }
-        ecrd = iet_fft_start();
+        ecrd = iet_ifft_start();
         if(ecrd != E_OK)
         {
             iet_printf_err("ifft_poll iet_fft_start = 0x%x\r\n", ecrd);
@@ -408,11 +402,11 @@ void hard_rfft_comp(int fft_flag, int *fftin, int *fftout)
     	while(!iet_fft_if_done())
         {
         }
-    	for(int j = 0; j < 128; j++)
+    	for(int j = 0; j < FFTN; j++)
         {
         	int k=j<<1;
     		fftout[j] = g_fft_buf[k];
-    		fftout[128+j] = g_fft_buf[k+1];
+    		fftout[FFTN+j] = g_fft_buf[k+1];
            
         }
     }
@@ -422,9 +416,9 @@ void hard_rfft_int32(int fft_flag, int *fftin, int *fftout)
     if(fft_flag == 0)//fft
     {
         fft_struct.addr = &g_fft_buf[0];	
-    	fft_struct.len = 128 * 2;
+    	fft_struct.len = FFTN * 2;
     	#if 1
-    	for(int j = 0; j < 128; j++)
+    	for(int j = 0; j < FFTN; j++)
         {
     		int k=j<<1;
     		g_fft_buf[k] = fftin[j];
@@ -452,7 +446,7 @@ void hard_rfft_int32(int fft_flag, int *fftin, int *fftout)
 	    {
 	    }
 	    #if 1
-	    for(int j = 0; j < 130; j++)
+	    for(int j = 0; j < (FFTN+2); j++)
         {
     		fftout[j] = g_fft_buf[j];
         }
@@ -461,18 +455,18 @@ void hard_rfft_int32(int fft_flag, int *fftin, int *fftout)
     else if(fft_flag == 1)//ifft
     {
         fft_struct.addr = &g_fft_buf[0];	
-    	fft_struct.len = 128 * 2;
+    	fft_struct.len = FFTN * 2;
     	#if 1
-    	memcpy(g_fft_buf, fftin, sizeof(int)*130);
-    	for(int j = 65; j < 128; j++)
+    	memcpy(g_fft_buf, fftin, sizeof(int)*(FFTN+2));
+    	for(int j = FFTN/2+1; j < FFTN; j++)
     	{
             int k=j<<1;
-            g_fft_buf[k] = g_fft_buf[256-k];
-            g_fft_buf[k+1] = -g_fft_buf[256-k+1];
+            g_fft_buf[k] = g_fft_buf[FFTN*2-k];
+            g_fft_buf[k+1] = -g_fft_buf[FFTN*2-k+1];
          }
 #endif
         
-        ecrd = iet_ifft_init(FFT_POLL);
+        ecrd = iet_fft_init(FFT_POLL);
     	if(ecrd != 0)
         {
             iet_printf_err("ifft_poll iet_fft_init = 0x%x\r\n", ecrd);
@@ -482,7 +476,7 @@ void hard_rfft_int32(int fft_flag, int *fftin, int *fftout)
         {
             iet_printf_err("ifft_poll FFT_CMD_WRITE = 0x%x\r\n", ecrd);
         }
-        ecrd = iet_fft_start();
+        ecrd = iet_ifft_start();
         if(ecrd != E_OK)
         {
             iet_printf_err("ifft_poll iet_fft_start = 0x%x\r\n", ecrd);
@@ -491,7 +485,7 @@ void hard_rfft_int32(int fft_flag, int *fftin, int *fftout)
         {
         }
         #if 1
-    	for(int j = 0; j < 128; j++)
+    	for(int j = 0; j < FFTN; j++)
         {
         	int k=j<<1;
     		fftout[j] = g_fft_buf[k];
@@ -516,6 +510,7 @@ void FilterFar(int num_partitions,
       if (i + x_fft_buf_block_pos >= num_partitions) {
         xPos -= num_partitions * (PART_LEN3);
       }
+
       for (j = 0; j < PART_LEN1; j++) 
       {//(a+bi)(c+di)
           y_fft_hifi[2*j] += ((long long)x_fft_buf_hifi[xPos + j*2] *h_fft_buf_hifi[pos + j*2] - (long long)x_fft_buf_hifi[xPos +j*2 + 1] * h_fft_buf_hifi[pos + j*2 + 1])>>(shift);
@@ -524,46 +519,45 @@ void FilterFar(int num_partitions,
   }
 }
 #if 0
+#if 0
 void ScaleErrorSignal(int mu,//Q31
                              int error_threshold,//Q31
-                             long long x_pow[PART_LEN1],
-                             int32_t ef_hifi[PART_LEN3]//aecnearq
+                             long long x_pow[PART_LEN1],//Q0
+                             int32_t ef_hifi[PART_LEN3],//in: Q0, out: Q31
+                             long long ef_hifi_err[PART_LEN3]
 ) {
   int i;
-  long long abs_ef;
-  long long thres;
-  long long fix_ef;
-  long long thr_tmp = ((long long)error_threshold*mu);//Q62
-  aecnearq = -31;
+  float ferror_threshold=1e-6f; 
+  float abs_ef;
+  float ef0, ef1;
   for (i = 0; i < (PART_LEN1); i++) {
-	  abs_ef = sqrtf((long long)ef_hifi[2*i] * ef_hifi[2*i] + (long long)ef_hifi[2*i+1] * ef_hifi[2*i+1]);
-      thres = (x_pow[i]*error_threshold)>>31;
-      if (abs_ef > thres) {
-        fix_ef = (thr_tmp / (abs_ef + 1));//Q62
-        //fix_ef = (abs_ef*mu);//2147483648 Q31
-        ef_hifi[2*i]   = ((long long)fix_ef*ef_hifi[2*i])>>31;
-        ef_hifi[2*i+1] = -((long long)fix_ef*ef_hifi[2*i+1])>>31;//此处取共轭
-      }
-      else
-      {
-          // Stepsize factor
-          //fix_ef = (mu/(x_pow[i] + 1));//17179869184 Q34
-          ef_hifi[2*i]   = ((long long)mu*ef_hifi[2*i]/(x_pow[i] + 1));
-          ef_hifi[2*i+1] = -((long long)mu*ef_hifi[2*i+1]/(x_pow[i] + 1));//此处取共轭
-      }
+    ef0 = (float)ef_hifi[2*i] /(x_pow[i] + 1e-10f);
+    ef1 = (float)ef_hifi[2*i+1]/(x_pow[i] + 1e-10f);
+    abs_ef = sqrtf(ef0 * ef0 + ef1 * ef1);
 
+    if (abs_ef > ferror_threshold) {
+      abs_ef = ferror_threshold / (abs_ef + 1e-10f);
+      ef0 *= abs_ef;
+      ef1 *= abs_ef;
     }
 
+    // Stepsize factor
+    ef0 = ef0* 0.4*2147483648;
+    ef1 = ef1* 0.4*2147483648;
+    ef_hifi_err[2*i] = ef0;
+    ef_hifi_err[2*i+1]= ef1;
+  }
 }
 #else
 void ScaleErrorSignal(int mu,//Q31
                              int error_threshold,//Q31
                              long long x_pow[PART_LEN1],//Q0
-                             int32_t ef_hifi[PART_LEN3]//in: Q0, out: Q31
+                             int32_t ef_hifi[PART_LEN3],//in: Q0, out: Q31
+                             long long ef_hifi_err[PART_LEN3]
 ) {
   int i;
-  int abs_ef;
-  int thres;
+  long long abs_ef;
+  long long thres;
   //float fix_ef;
   long long thr_tmp = ((long long)error_threshold*mu);//Q62
   aecnearq = -31;
@@ -571,21 +565,189 @@ void ScaleErrorSignal(int mu,//Q31
 	  abs_ef = sqrtf((long long)ef_hifi[2*i] * ef_hifi[2*i] + (long long)ef_hifi[2*i+1] * ef_hifi[2*i+1]);
       thres = ((long long)x_pow[i]*error_threshold)>>31;
       if (abs_ef > thres) {
-        ef_hifi[2*i] =    (((long long)ef_hifi[2*i]*thr_tmp) / (abs_ef))>>31;
-        ef_hifi[2*i+1] = (((long long)ef_hifi[2*i+1]*thr_tmp) / (abs_ef))>>31;
+        ef_hifi_err[2*i] =    (((long long)ef_hifi[2*i]*thr_tmp) / (abs_ef))>>31;
+        ef_hifi_err[2*i+1] = (((long long)ef_hifi[2*i+1]*thr_tmp) / (abs_ef))>>31;
         //fix_ef = (abs_ef*mu);// Q31
       }
       else
       {
           // Stepsize factor
-          ef_hifi[2*i] = (((long long)ef_hifi[2*i]*mu)/(x_pow[i]));
-          ef_hifi[2*i+1] = (((long long)ef_hifi[2*i+1]*mu)/(x_pow[i]));
+          ef_hifi_err[2*i] = (((long long)ef_hifi[2*i]*mu)/(x_pow[i]+1));
+          ef_hifi_err[2*i+1] = (((long long)ef_hifi[2*i+1]*mu)/(x_pow[i]+1));
       }
 
     }
 
 }
 #endif
+#else
+#define max(a, b)      ((a) > (b) ? (a) : (b))
+#define min(a, b)      ((a) < (b) ? (a) : (b))
+#define MAX_MOD(a, b) (max(abs(a), abs(b))+(min(abs(a),abs(b))>>2))
+//#define MAX_MOD(a, b) (((max(abs(a), abs(b))<<2)+min(abs(a),abs(b)))>>2)
+void ScaleErrorSignal(int mu,//Q31
+                             int error_threshold,//Q31
+                             long long x_pow[PART_LEN1],//Q0
+                             int32_t ef_hifi[PART_LEN3],//in: Q0, out: Q31
+                             long long ef_hifi_err[PART_LEN3]
+) {
+  int i;
+  uint32_t abs_ef;
+  long long thres;
+  long long thr_tmp = ((long long)error_threshold*mu);//Q62
+  aecnearq = -31;
+  for (i = 0; i < (PART_LEN1); i++) {
+	  abs_ef = MAX_MOD(ef_hifi[2*i], ef_hifi[2*i+1]);//sqrtf((long long)ef_hifi[2*i] * ef_hifi[2*i] + (long long)ef_hifi[2*i+1] * ef_hifi[2*i+1]);
+      thres = ((long long)x_pow[i]*error_threshold)>>31;
+      if (abs_ef > thres) {
+        ef_hifi_err[2*i] =    (((long long)ef_hifi[2*i]*thr_tmp) / (abs_ef))>>31;
+        ef_hifi_err[2*i+1] = (((long long)ef_hifi[2*i+1]*thr_tmp) / (abs_ef))>>31;
+      }
+      else
+      {
+          // Stepsize factor
+          ef_hifi_err[2*i] = (((long long)ef_hifi[2*i]*mu)/(x_pow[i]+1));
+          ef_hifi_err[2*i+1] = (((long long)ef_hifi[2*i+1]*mu)/(x_pow[i]+1));
+      }
+
+    }
+
+}
+#endif
+ #ifdef HARD_FFT
+
+typedef uint32_t (*asr_wait_done)(uint32_t ui4_timeout);
+extern asr_wait_done  fft_finsh;
+
+void AEC_fft(int* pData)
+{
+	fft_struct.addr = pData;
+	fft_struct.len = 128 * 2;
+	
+	ecrd = iet_fft_control(FFT_CMD_WRITE, &fft_struct);
+    if(ecrd != E_OK)
+    {
+        iet_printf_err("fft_poll FFT_CMD_WRITE = 0x%x\r\n", ecrd);
+    }
+
+    ecrd = iet_fft_start();
+    if(ecrd != E_OK)
+    {
+        iet_printf_err("fft_poll iet_fft_start = 0x%x\r\n", ecrd);
+    }
+
+	
+	int result = fft_finsh(1);
+	if(result != 0){
+		iet_printf_err("fft_finsh time out!!!!!!\r\n", ecrd);
+	}
+}
+
+
+void hard_rfft_comp_INT(int fft_flag, int *fftin, int *fftout)
+{
+    //in:先x1(n)的128点，再x2(n)的128点. result: 先x1(n)的复数65点，再x2(n)的复数65点
+    if(fft_flag == 0)//fft
+    {
+        //fft_struct.addr = &g_fft_buf[0];	
+    	//fft_struct.len = 128 * 2;
+    	#if 1
+    	for(int j = 0; j < 128; j++)
+        {
+    		int k=j<<1;
+    		g_fft_buf[k] = fftin[j];
+    		g_fft_buf[k+1] = fftin[128+j];
+        }	
+        #endif
+        AEC_fft(g_fft_buf);
+        
+	    fftout[0] = g_fft_buf[0];           fftout[1] = 0;
+	    fftout[130+0] = g_fft_buf[1];       fftout[130+1] = 0;
+	    fftout[128] = g_fft_buf[128+1];     fftout[128+1] = 0;
+	    fftout[130+128] = g_fft_buf[128+1]; fftout[130+128+1] = 0;
+	    for(int j = 1; j < 63; j++)
+        {
+            int k=j<<1;
+    		fftout[k] =   (g_fft_buf[k] + g_fft_buf[256-k])>>1;
+    		fftout[k+1] = (g_fft_buf[k+1] - g_fft_buf[256-k+1])>>1;
+
+    		fftout[130+k] =   (g_fft_buf[k+1] + g_fft_buf[256-k+1])>>1;
+    		fftout[130+k+1] = (g_fft_buf[k] - g_fft_buf[256-k])>>1;
+        }
+    }
+    
+    //in:先x1(n)的复数65点，再x2(n)的复数65点. result: 先x1(n)的128点，再x2(n)的128点
+    else if(fft_flag == 1)//ifft 
+    {
+        //fft_struct.addr = &g_fft_buf[0];	
+    	//fft_struct.len = 128 * 2;
+
+    	for(int j = 0; j < 65; j++)
+    	{
+    	    int k=j<<1;
+    	    g_fft_buf[k] = fftin[k]-fftin[130+k+1];
+    	    g_fft_buf[k+1] = fftin[k+1]-fftin[130+k];
+    	}
+    	for(int j = 65; j < 128; j++)
+    	{
+            int k=j<<1;
+            g_fft_buf[k] = g_fft_buf[256-k];
+            g_fft_buf[k+1] = -g_fft_buf[256-k+1];
+         }
+        AEC_fft(g_fft_buf);
+    	for(int j = 0; j < 128; j++)
+        {
+        	int k=j<<1;
+    		fftout[j] = g_fft_buf[k];
+    		fftout[128+j] = g_fft_buf[k+1];
+           
+        }
+    }
+}
+void hard_rfft_int32_INT(int fft_flag, int *fftin, int *fftout)
+
+{
+    if(fft_flag == 0)//fft
+    {
+        //fft_struct.addr = &g_fft_buf[0];	
+    	//fft_struct.len = 128 * 2;
+    	#if 1
+    	for(int j = 0; j < 128; j++)
+        {
+    		int k=j<<1;
+    		g_fft_buf[k] = fftin[j];
+    		g_fft_buf[k+1] = 0;
+        }	
+        #endif
+        AEC_fft(g_fft_buf);
+
+	    for(int j = 0; j < 130; j++)
+        {
+    		fftout[j] = g_fft_buf[j];
+        }
+    }
+    else if(fft_flag == 1)//ifft
+    {
+        //fft_struct.addr = &g_fft_buf[0];	
+    	//fft_struct.len = 128 * 2;
+    	memcpy(g_fft_buf, fftin, sizeof(int)*130);
+    	for(int j = 65; j < 128; j++)
+    	{
+            int k=j<<1;
+            g_fft_buf[k] = g_fft_buf[256-k];
+            g_fft_buf[k+1] = -g_fft_buf[256-k+1];
+         }
+        AEC_fft(g_fft_buf);
+    	for(int j = 0; j < 128; j++)
+        {
+        	int k=j<<1;
+    		fftout[j] = g_fft_buf[k];
+           
+        }
+    }
+}
+
+ 
 void FilterAdaptation_comp(
     int num_partitions,
     int x_fft_buf_block_pos,
@@ -612,7 +774,86 @@ void FilterAdaptation_comp(
      }
 
     pos1 = i*2 * PART_LEN3;
-    pos2 = i*2+1 * PART_LEN3;
+    pos2 = (i*2+1) * PART_LEN3;
+    //1. in frequency domain, do inversefft for mu*e*x ; 2. then reserve part of result and scale fft in time domain; 3. transform the processed fft to frequency domain and update the filer coefficient
+    #if 1
+    for (j = 0; j < PART_LEN1; j++){ //(a-bi)*(c+di)
+        int32_t err,eri;
+        int k=j<<1;
+        err = e_fft_hifi[k];
+        eri = e_fft_hifi[k+1];
+        fft_hifi[k] = (x_fft_buf_hifi[xPos1 + k]*err + x_fft_buf_hifi[xPos1 + k + 1]*eri)>>7;
+        fft_hifi[k + 1] = (x_fft_buf_hifi[xPos1 + k]*eri-x_fft_buf_hifi[xPos1 + k + 1]*err)>>7;
+        fft_hifi[PART_LEN3+k] = (x_fft_buf_hifi[xPos2 + k]*err + x_fft_buf_hifi[xPos2 + k + 1]*eri)>>7;
+        fft_hifi[PART_LEN3+k + 1] = (x_fft_buf_hifi[xPos2 + k]*eri-x_fft_buf_hifi[xPos2 + k + 1]*err)>>7;
+    }
+    #ifndef INT_MODE 
+    hard_rfft_comp(1, fft_hifi, fft);//hyli
+    #else
+    hard_rfft_comp_INT(1, fft_hifi, fft);
+    #endif
+
+    memset(fft + PART_LEN, 0, sizeof(int) * PART_LEN);
+    memset(fft+PART_LEN2 + PART_LEN, 0, sizeof(int) * PART_LEN);
+
+    #ifndef INT_MODE 
+    hard_rfft_comp(0, fft, fft_out);//hyli
+    #else
+    hard_rfft_comp_INT(0, fft, fft_out);
+    #endif
+
+    for (j = 0; j < PART_LEN1; j++){
+        int k=j<<1;
+    	h_fft_buf_hifi[pos1 + k]     += (fft_out[k]>>(9));
+    	h_fft_buf_hifi[pos1 + k + 1] += (fft_out[k + 1]>>(9));
+    	h_fft_buf_hifi[pos2 + k]     += (fft_out[PART_LEN3+k]>>(9));
+    	h_fft_buf_hifi[pos2 + k + 1] += (fft_out[PART_LEN3+k + 1]>>(9));
+    }
+    #else
+    for (j = 0; j < PART_LEN1; j++){
+        int32_t err,eri;
+        int k=j<<1;
+        err = e_fft_hifi[k];
+        eri = e_fft_hifi[k+1];
+    	h_fft_buf_hifi[pos1 + k]     += ((x_fft_buf_hifi[xPos1 + k]*err + x_fft_buf_hifi[xPos1 + k + 1]*eri)>>(16));
+    	h_fft_buf_hifi[pos1 + k + 1] += ((x_fft_buf_hifi[xPos1 + k]*eri-x_fft_buf_hifi[xPos1 + k + 1]*err)>>(16));
+    	h_fft_buf_hifi[pos2 + k]     += ((x_fft_buf_hifi[xPos2 + k]*err + x_fft_buf_hifi[xPos2 + k + 1]*eri)>>(16));
+    	h_fft_buf_hifi[pos2 + k + 1] += ((x_fft_buf_hifi[xPos2 + k]*eri-x_fft_buf_hifi[xPos2 + k + 1]*err)>>(16));
+    }
+    #endif
+
+  }
+
+}
+void FilterAdaptation_comp_parallel(
+    int num_partitions,
+    int x_fft_buf_block_pos,
+    int32_t x_fft_buf_hifi[kExtendedNumPartitions * PART_LEN3],//Q0
+    int32_t e_fft_hifi[PART_LEN3],//Q31
+    int32_t h_fft_buf_hifi[kExtendedNumPartitions * PART_LEN3]//aecq
+                       )
+{
+  int i, j;
+  int32_t fft[PART_LEN2*2] __attribute__((aligned(16)));
+  int32_t fft_hifi[PART_LEN3*2];
+  int32_t fft_out[PART_LEN3*2];
+  int32_t fft_hifi2[PART_LEN3*2];
+  for (i = 0; i < num_partitions>>2; i++) {
+     int xPos1 = (i*4 + x_fft_buf_block_pos) * (PART_LEN3);
+     int pos1;
+     int xPos2 = (i*4+1 + x_fft_buf_block_pos) * (PART_LEN3);
+     int pos2;
+
+     // Check for wrap
+     if (i*4 + x_fft_buf_block_pos >= num_partitions) {
+       xPos1 -= num_partitions * PART_LEN3;
+     }
+     if (i*4+1 + x_fft_buf_block_pos >= num_partitions) {
+       xPos2 -= num_partitions * PART_LEN3;
+     }
+
+    pos1 = i*4 * PART_LEN3;
+    pos2 = (i*4+1) * PART_LEN3;
     //1. in frequency domain, do inversefft for mu*e*x ; 2. then reserve part of result and scale fft in time domain; 3. transform the processed fft to frequency domain and update the filer coefficient
 
     for (j = 0; j < PART_LEN1; j++){ //(a-bi)*(c+di)
@@ -625,34 +866,75 @@ void FilterAdaptation_comp(
         fft_hifi[PART_LEN3+k] = (x_fft_buf_hifi[xPos2 + k]*err + x_fft_buf_hifi[xPos2 + k + 1]*eri)>>7;
         fft_hifi[PART_LEN3+k + 1] = (x_fft_buf_hifi[xPos2 + k]*eri-x_fft_buf_hifi[xPos2 + k + 1]*err)>>7;
     }
+
+    hard_rfft_comp_INT(1, fft_hifi, fft);
     
-    //hard_rfft_comp(1, fft_hifi, fft);//hyli
-    arm_rfft_q31(&S_ifft128, fft_hifi, fft);//hyli
-    
+//////
+    int xPos3 = (i*4+2 + x_fft_buf_block_pos) * (PART_LEN3);
+    int pos3;
+    int xPos4 = (i*4+3 + x_fft_buf_block_pos) * (PART_LEN3);
+    int pos4;
+
+    // Check for wrap
+    if (i*4+2 + x_fft_buf_block_pos >= num_partitions) {
+        xPos3 -= num_partitions * PART_LEN3;
+    }
+    if (i*4+3 + x_fft_buf_block_pos >= num_partitions) {
+        xPos4 -= num_partitions * PART_LEN3;
+    }
+
+    pos3 = (i*4+2) * PART_LEN3;
+    pos4 = (i*4+3) * PART_LEN3;
+
+    for (j = 0; j < PART_LEN1; j++){ //(a-bi)*(c+di)
+        int32_t err,eri;
+        int k=j<<1;
+        err = e_fft_hifi[k];
+        eri = e_fft_hifi[k+1];
+        fft_hifi2[k] = (x_fft_buf_hifi[xPos3 + k]*err + x_fft_buf_hifi[xPos3 + k + 1]*eri)>>7;
+        fft_hifi2[k + 1] = (x_fft_buf_hifi[xPos3 + k]*eri-x_fft_buf_hifi[xPos3 + k + 1]*err)>>7;
+        fft_hifi2[PART_LEN3+k] = (x_fft_buf_hifi[xPos4 + k]*err + x_fft_buf_hifi[xPos4 + k + 1]*eri)>>7;
+        fft_hifi2[PART_LEN3+k + 1] = (x_fft_buf_hifi[xPos4 + k]*eri-x_fft_buf_hifi[xPos4 + k + 1]*err)>>7;
+    }
+//////
+
     memset(fft + PART_LEN, 0, sizeof(int) * PART_LEN);
     memset(fft+PART_LEN2 + PART_LEN, 0, sizeof(int) * PART_LEN);
 
-    //hard_rfft_comp(0, fft, fft_out);//hyli
-    arm_rfft_q31(&S_fft128, fft, fft_out);//hyli
+    hard_rfft_comp_INT(0, fft, fft_out);
 
     for (j = 0; j < PART_LEN1; j++){
         int k=j<<1;
     	h_fft_buf_hifi[pos1 + k]     += (fft_out[k]>>(9));
     	h_fft_buf_hifi[pos1 + k + 1] += (fft_out[k + 1]>>(9));
-    	h_fft_buf_hifi[pos1 + k]     += (fft_out[PART_LEN3+k]>>(9));
-    	h_fft_buf_hifi[pos1 + k + 1] += (fft_out[PART_LEN3+k + 1]>>(9));
+    	h_fft_buf_hifi[pos2 + k]     += (fft_out[PART_LEN3+k]>>(9));
+    	h_fft_buf_hifi[pos2 + k + 1] += (fft_out[PART_LEN3+k + 1]>>(9));
     }
 
+//////    
+    hard_rfft_comp_INT(1, fft_hifi2, fft);
+    
+    memset(fft + PART_LEN, 0, sizeof(int) * PART_LEN);
+    memset(fft+PART_LEN2 + PART_LEN, 0, sizeof(int) * PART_LEN);
+    
+    hard_rfft_comp_INT(0, fft, fft_out);
 
+    for (j = 0; j < PART_LEN1; j++){
+        int k=j<<1;
+    	h_fft_buf_hifi[pos3 + k]     += (fft_out[k]>>(9));
+    	h_fft_buf_hifi[pos3 + k + 1] += (fft_out[k + 1]>>(9));
+    	h_fft_buf_hifi[pos4 + k]     += (fft_out[PART_LEN3+k]>>(9));
+    	h_fft_buf_hifi[pos4 + k + 1] += (fft_out[PART_LEN3+k + 1]>>(9));
+    }
   }
 
 }
-
+#endif
 void FilterAdaptation(
     int num_partitions,
     int x_fft_buf_block_pos,
     int32_t x_fft_buf_hifi[kExtendedNumPartitions * PART_LEN3],//Q0
-    int32_t e_fft_hifi[PART_LEN3],//Q31
+    long long e_fft_hifi[PART_LEN3],//Q31
     int32_t h_fft_buf_hifi[kExtendedNumPartitions * PART_LEN3]//aecq
                        ) {
   int i, j;
@@ -670,27 +952,44 @@ void FilterAdaptation(
     int32_t fft[PART_LEN2*2] __attribute__((aligned(16)));
     int32_t fft_hifi[PART_LEN3*2];
     int32_t fft_out[PART_LEN3*2];
+    #if 0
     for (j = 0; j < PART_LEN1; j++){ //(a-bi)*(c+di)
-        fft_hifi[2*j] = (x_fft_buf_hifi[xPos + j*2]*e_fft_hifi[2*j] + x_fft_buf_hifi[xPos + j*2 + 1]*e_fft_hifi[2*j+1])>>7;
-        fft_hifi[2*j + 1] = (x_fft_buf_hifi[xPos + j*2]*e_fft_hifi[2*j+1]-x_fft_buf_hifi[xPos + j*2 + 1]*e_fft_hifi[2*j])>>7;
-    }
+        fft_hifi[2*j] = ((long long)x_fft_buf_hifi[xPos + j*2]*e_fft_hifi[2*j] +(long long) x_fft_buf_hifi[xPos + j*2 + 1]*e_fft_hifi[2*j+1])>>1;
+        fft_hifi[2*j + 1] = ((long long)x_fft_buf_hifi[xPos + j*2]*e_fft_hifi[2*j+1]-(long long)x_fft_buf_hifi[xPos + j*2 + 1]*e_fft_hifi[2*j])>>1;
+    }    
     #ifdef HARD_FFT
-    hard_rfft_int32(1, fft_hifi, fft);//hyli
+        #ifndef INT_MODE         
+        hard_rfft_int32(1, fft_hifi, fft);//hyli
+        #else
+        hard_rfft_int32_INT(1, fft_hifi, fft);
+        #endif
     #else
     //realFFT_Inverse( fft, fft_hifi, 128 );
     arm_rfft_q31(&S_ifft128, fft_hifi, fft);//hyli
     #endif
     memset(fft + PART_LEN, 0, sizeof(int) * PART_LEN);
     #ifdef HARD_FFT
-    hard_rfft_int32(0, fft, fft_out);//hyli
+        #ifndef INT_MODE         
+        hard_rfft_int32(0, fft, fft_out);//hyli
+        #else
+        hard_rfft_int32_INT(0, fft, fft_out);
+        #endif
     #else
     //realFFT_forward( fft_out, fft, 128 );
     arm_rfft_q31(&S_fft128, fft, fft_out);//hyli
     #endif
     for (j = 0; j < PART_LEN1; j++){
-    	h_fft_buf_hifi[pos + j*2 ]     += (fft_out[2*j]>>(9));
-    	h_fft_buf_hifi[pos + j*2 + 1] += (fft_out[2*j + 1]>>(9));
+    	h_fft_buf_hifi[pos + j*2 ]     += (fft_out[2*j]);
+    	h_fft_buf_hifi[pos + j*2 + 1] += (fft_out[2*j + 1]);
     }
+    #else
+    for (j = 0; j < PART_LEN1; j++){
+        long long tmp1 = (((long long)x_fft_buf_hifi[xPos + j*2]*e_fft_hifi[2*j] + (long long)x_fft_buf_hifi[xPos + j*2 + 1]*e_fft_hifi[2*j+1])>>(16));
+        long long tmp2 = (((long long)x_fft_buf_hifi[xPos + j*2]*e_fft_hifi[2*j+1]-(long long)x_fft_buf_hifi[xPos + j*2 + 1]*e_fft_hifi[2*j])>>(16));
+    	h_fft_buf_hifi[pos + j*2 ]     += tmp1;
+    	h_fft_buf_hifi[pos + j*2 + 1] += tmp2;
+    }
+    #endif
 
 
   }
@@ -721,7 +1020,7 @@ int log_16q16(int x) {
   }
 
 
-#if 0
+#if 1
 static int PartitionDelay(
     int num_partitions,
     int32_t h_fft_buf[kExtendedNumPartitions * PART_LEN3]
@@ -805,17 +1104,30 @@ __inline static void StoreAsComplex(const float* data,
 }
 #endif
 void ComputeCoherence(const CoherenceState* coherence_state,
-                             int* cohde,
-                             int* cohxd) {
+                             uint16_t* cohde,
+                             uint16_t* cohxd) {
   // Subband coherence
   int de,xd;
   for (int i = 0; i < PART_LEN1; i++) {
-     cohde[i] = (((coherence_state->sde[i][0] * coherence_state->sde[i][0] +
-                coherence_state->sde[i][1] * coherence_state->sde[i][1])) /
-               (((coherence_state->sd[i] * coherence_state->se[i])>>10)+1))<<6;
-     cohxd[i] = (((coherence_state->sxd[i][0] * coherence_state->sxd[i][0] +
-                coherence_state->sxd[i][1] * coherence_state->sxd[i][1])) /
-               (((coherence_state->sx[i] * coherence_state->sd[i])>>10)+1))<<6;
+    long long sxd0 = coherence_state->sxd[i][0]>>2;
+    long long sxd1 = coherence_state->sxd[i][1]>>2;
+    long long sde0 = coherence_state->sde[i][0];
+    long long sde1 = coherence_state->sde[i][1];
+    long long sx = coherence_state->sx[i];
+    long long sd = coherence_state->sd[i];
+    long long se = coherence_state->se[i];
+    uint64_t  sdep, sdse, sxdp, sxsd;
+    
+long long lsd= sxd0 * sxd0+ sxd1 * sxd1;
+lsd = (sx * sd);
+    sdep = (sde0 * sde0 + sde1 * sde1);
+    sdse = (sd * se);
+    cohde[i] = ((sdep)/((sdse>>8)+1))<<8;
+
+    sxdp = (sxd0 * sxd0 + sxd1 * sxd1);
+    sxsd = (sx * sd);
+    cohxd[i] = ((sxdp<<4)/((sxsd>>8)+1))<<8;
+    
   }
 }
 #if 0
@@ -1177,7 +1489,7 @@ static void RegressorPower(
 
 }
 #endif
-
+int FilterAdaptation_n = 0;
 void EchoSubtraction(
     int num_partitions,
     int extended_filter_enabled,
@@ -1198,6 +1510,7 @@ void EchoSubtraction(
 	  int32_t e[PART_LEN];
 	  //float s_hifi[PART_LEN];
 	  int32_t e_fft_hifi[PART_LEN3*2];//aecnearq
+	  long long e_fft_hifi_err[PART_LEN3*2];
 	  int i;
 	  int32_t* s;//, *e;
 
@@ -1220,11 +1533,14 @@ void EchoSubtraction(
              kExtendedNumPartitions * PART_LEN3 * sizeof(int32_t));
      *extreme_filter_divergence = 0;
    }
-   //start0 = SysTickCnt_test;
+   //t0 = osKernelGetTickCount();
+   //for (int n = 0; n < 4*32; n++)
+   {
   // Produce echo estimate s_fft.
  //memcpy(h_tmp,h_fft_buf_hifi,128*4);//////////for test
  FilterFar(num_partitions, *x_fft_buf_block_pos, x_fft_buf_hifi, h_fft_buf_hifi, s_fft_hifi);//0.33ms@M3
- //iet_printf_msg("FilterFar time =%d \r\n", SysTickCnt_test-start0);
+ }
+ //iet_printf_msg("FilterFar time =%d \r\n", osKernelGetTickCount()-t0);
   // Compute the time-domain echo estimate s.
     //#ifdef HARD_FFT
     //hard_rfft_int32(1, s_fft_hifi, s_extended);//hyli
@@ -1249,17 +1565,55 @@ void EchoSubtraction(
   //realFFT_forward(e_fft_hifi, e_extended, 128);
   arm_rfft_q31(&S_fft128, e_extended, e_fft_hifi);//hyli
   //#endif
-   //start0 = SysTickCnt_test;
-    ScaleErrorSignal(filter_step_size, error_threshold, x_pow, e_fft_hifi);//0.48ms@M3
-//iet_printf_msg("ScaleErrorSignal time =%d \r\n", SysTickCnt_test-start0);
+   //t0 = osKernelGetTickCount();
+   //for (int n = 0; n < 4*32; n++)
+   {
+    ScaleErrorSignal(filter_step_size, error_threshold, x_pow, e_fft_hifi, e_fft_hifi_err);//0.48ms@M3
+    }
+//iet_printf_msg("ScaleErrorSignal time =%d \r\n", osKernelGetTickCount()-t0);
  //start0 = SysTickCnt_test;
+ //t0 = osKernelGetTickCount();
+ //FilterAdaptation_n++;
+ //for (int n = 0; n < 4*32; n++)
+ {
+
+ #ifdef HARD_FFT
     FilterAdaptation_comp(num_partitions, *x_fft_buf_block_pos,
                                x_fft_buf_hifi, e_fft_hifi, h_fft_buf_hifi);//3.14ms@M3
-//iet_printf_msg("FilterAdaptation time =%d \r\n", SysTickCnt_test-start0);
+     #if 0
+     if(FilterAdaptation_n<8)//8
+     {
+        FilterAdaptation_n++;
+        for(int i = 0; i < PART_LEN3; i++) {
+            iet_printf_msg("%d, ",e_fft_hifi[i]);
+            if((i+1)%32==0)
+            {
+                iet_printf_msg("\r\n");
+            }
+        }
+        iet_printf_msg("\r\n");
+        for(int i = 0; i < kExtendedNumPartitions * PART_LEN3; i++) {
+            iet_printf_msg("%d, ",h_fft_buf_hifi[i]);
+            if((i+1)%32==0)
+            {
+                iet_printf_msg("\r\n");
+            }
+        }
+        iet_printf_msg("\r\n");
+     }
+     #endif
+ #else
+ FilterAdaptation(num_partitions, *x_fft_buf_block_pos,
+                               x_fft_buf_hifi, e_fft_hifi_err, h_fft_buf_hifi);
+ #endif 
+
+ 
+ }
+//iet_printf_msg("FilterAdaptation time =%d \r\n", osKernelGetTickCount()-t0);
     memcpy(echo_subtractor_output, e, sizeof(int32_t) * PART_LEN);
 
 }
-#if 0
+#if 1
 int fastPow3(int a, int b) {//Q16
     int result = 65536;
     while(b > 0) {
@@ -1275,7 +1629,7 @@ int fastPow3(int a, int b) {//Q16
 }
 static void Overdrive(int overdrive_scaling,//Q9
                       const int hNlFb,//Q16
-                      int hNl[PART_LEN1]) {//Q16
+                      uint16_t hNl[PART_LEN1]) {//Q16
   for (int i = 0; i < PART_LEN1; ++i) {
     // Weight subbands
     if (hNl[i] > hNlFb) {
@@ -1286,18 +1640,28 @@ static void Overdrive(int overdrive_scaling,//Q9
     //hNl[i] = hNl[i]*hNl[i]*hNl[i]*hNl[i];
   }
 }
-void Suppress(const int hNl[PART_LEN1],//Q16
+static int NLP_enable=1;
+void Suppress(const uint16_t hNl[PART_LEN1],//Q16
 		int32_t efw_hifi[PART_LEN3]
 
 		             ) {
-  for (int i = 0; i < PART_LEN1; ++i) {
-	  // Suppress error signal
-	      efw_hifi[2*i] = ((long long)efw_hifi[2*i]*hNl[i])>>16;
-	      efw_hifi[2*i + 1] = (-(long long)efw_hifi[2*i + 1]*hNl[i])>>16;//取共轭给后续的ifft
+  if(NLP_enable){  	             
+      for (int i = 0; i < PART_LEN1; ++i) {
+    	  // Suppress error signal
+    	      efw_hifi[2*i] = ((long long)efw_hifi[2*i]*hNl[i])>>16;
+    	      efw_hifi[2*i + 1] = (-(long long)efw_hifi[2*i + 1]*hNl[i])>>16;//取共轭给后续的ifft
 
-	      // Ooura fft returns incorrect sign on imaginary component. It matters here
-	      // because we are making an additive change with comfort noise.
-	     // efw_hifi[2*i + 1] *= -1; for next scaled inverse fft take the -1 sign
+    	      // Ooura fft returns incorrect sign on imaginary component. It matters here
+    	      // because we are making an additive change with comfort noise.
+    	     // efw_hifi[2*i + 1] *= -1; for next scaled inverse fft take the -1 sign
+      }
+  }
+  else{
+        for (int i = 0; i < PART_LEN1; ++i) {
+    	  // Suppress error signal
+    	      efw_hifi[2*i] = efw_hifi[2*i];
+    	      efw_hifi[2*i + 1] = -efw_hifi[2*i + 1];//取共轭给后续的ifft
+      }
   }
 }
 // Threshold to protect against the ill-effects of a zero far-end.
@@ -1312,6 +1676,7 @@ const int WebRtcAec_kMinFarendPSD = 15;
 //
 // In addition to updating the PSDs, also the filter diverge state is
 // determined.
+#if 0
 static void UpdateCoherenceSpectra(int mult,
                                    bool extended_filter_enabled,
                                    int32_t efw_hifi[PART_LEN3],
@@ -1321,28 +1686,29 @@ static void UpdateCoherenceSpectra(int mult,
                                    short* filter_divergence_state,
                                    int* extreme_filter_divergence) {
   // Power estimate smoothing coefficients.
-  const int* ptrGCoh =
+  const long long* ptrGCoh =
       extended_filter_enabled
           ? WebRtcAec_kExtendedSmoothingCoefficients[mult - 1]
           : WebRtcAec_kNormalSmoothingCoefficients[mult - 1];
   int i;
   long long sdSum = 0, seSum = 0, ltmp;
-  int COQ = 5;
+  int COQ = 0;
+  int GQ = 13;
   for (i = 0; i < PART_LEN1; i++) {
-     coherence_state->sd[i] = (((long long)coherence_state->sd[i]*ptrGCoh[0])>>14) + ((((long long)dfw_hifi[2*i] * dfw_hifi[2*i] + (long long)dfw_hifi[2*i + 1] * dfw_hifi[2*i + 1])*ptrGCoh[1])>>(14+COQ));//Q(-COQ)
-     coherence_state->se[i] = (((long long)coherence_state->se[i]*ptrGCoh[0])>>14) + ((((long long)efw_hifi[2*i] * efw_hifi[2*i] + (long long)efw_hifi[2*i + 1] * efw_hifi[2*i + 1])*ptrGCoh[1])>>(14+COQ));
+     coherence_state->sd[i] = (((long long)coherence_state->sd[i]*ptrGCoh[0])>>GQ) + ((((long long)dfw_hifi[2*i] * dfw_hifi[2*i] + (long long)dfw_hifi[2*i + 1] * dfw_hifi[2*i + 1])*ptrGCoh[1])>>(GQ+COQ));//Q(-COQ)
+     coherence_state->se[i] = (((long long)coherence_state->se[i]*ptrGCoh[0])>>GQ) + ((((long long)efw_hifi[2*i] * efw_hifi[2*i] + (long long)efw_hifi[2*i + 1] * efw_hifi[2*i + 1])*ptrGCoh[1])>>(GQ+COQ));
      // We threshold here to protect against the ill-effects of a zero farend.
      // The threshold is not arbitrarily chosen, but balances protection and
      // adverse interaction with the algorithm's tuning.
      // TODO(bjornv): investigate further why this is so sensitive.
-     coherence_state->sx[i] = (((long long)coherence_state->sx[i]*ptrGCoh[0])>>14) + 
-     ((WEBRTC_SPL_MAX((long long)xfw_hifi[2*i] * xfw_hifi[2*i] + (long long)xfw_hifi[2*i + 1] * xfw_hifi[2*i + 1],WebRtcAec_kMinFarendPSD)*ptrGCoh[1])>>(14+COQ));
+     coherence_state->sx[i] = (((long long)coherence_state->sx[i]*ptrGCoh[0])>>GQ) + 
+     ((WEBRTC_SPL_MAX((long long)xfw_hifi[2*i] * xfw_hifi[2*i] + (long long)xfw_hifi[2*i + 1] * xfw_hifi[2*i + 1],WebRtcAec_kMinFarendPSD)*ptrGCoh[1])>>(GQ+COQ));
 
-     coherence_state->sde[i][0] = (((long long)coherence_state->sde[i][0]*ptrGCoh[0])>>14) + ((((long long)dfw_hifi[2*i] * efw_hifi[2*i] + (long long)dfw_hifi[2*i + 1] * efw_hifi[2*i + 1])*ptrGCoh[1])>>(14+COQ));//Q(-COQ)
-     coherence_state->sde[i][1] = (((long long)coherence_state->sde[i][1]*ptrGCoh[0])>>14) + ((((long long)dfw_hifi[2*i] * efw_hifi[2*i + 1] - (long long)dfw_hifi[2*i + 1] * efw_hifi[2*i])*ptrGCoh[1])>>(14+COQ));
+     coherence_state->sde[i][0] = (((long long)coherence_state->sde[i][0]*ptrGCoh[0])>>GQ) + ((((long long)dfw_hifi[2*i] * efw_hifi[2*i] + (long long)dfw_hifi[2*i + 1] * efw_hifi[2*i + 1])*ptrGCoh[1])>>(GQ+COQ));//Q(-COQ)
+     coherence_state->sde[i][1] = (((long long)coherence_state->sde[i][1]*ptrGCoh[0])>>GQ) + ((((long long)dfw_hifi[2*i] * efw_hifi[2*i + 1] - (long long)dfw_hifi[2*i + 1] * efw_hifi[2*i])*ptrGCoh[1])>>(GQ+COQ));
 
-     coherence_state->sxd[i][0] = (((long long)coherence_state->sxd[i][0]*ptrGCoh[0])>>14) + ((((long long)dfw_hifi[2*i] * xfw_hifi[2*i] + (long long)dfw_hifi[2*i + 1] * xfw_hifi[2*i + 1])*ptrGCoh[1])>>(14+COQ));
-     coherence_state->sxd[i][1] = (((long long)coherence_state->sxd[i][1]*ptrGCoh[0])>>14) + ((((long long)dfw_hifi[2*i] * xfw_hifi[2*i + 1] - (long long)dfw_hifi[2*i + 1] * xfw_hifi[2*i])*ptrGCoh[1])>>(14+COQ));
+     coherence_state->sxd[i][0] = (((long long)coherence_state->sxd[i][0]*ptrGCoh[0])>>GQ) + ((((long long)dfw_hifi[2*i] * xfw_hifi[2*i] + (long long)dfw_hifi[2*i + 1] * xfw_hifi[2*i + 1])*ptrGCoh[1])>>(GQ+COQ));
+     coherence_state->sxd[i][1] = (((long long)coherence_state->sxd[i][1]*ptrGCoh[0])>>GQ) + ((((long long)dfw_hifi[2*i] * xfw_hifi[2*i + 1] - (long long)dfw_hifi[2*i + 1] * xfw_hifi[2*i])*ptrGCoh[1])>>(GQ+COQ));
 
      sdSum += coherence_state->sd[i];
      seSum += coherence_state->se[i];
@@ -1356,6 +1722,136 @@ static void UpdateCoherenceSpectra(int mult,
   // than the nearend (13 dB).
   *extreme_filter_divergence = ((seSum<<8) > (5107 * sdSum));//19.95f
 }
+#endif
+#if 1
+static void UpdateCoherenceSpectra(int mult,
+                                   bool extended_filter_enabled,
+                                   int32_t efw[PART_LEN3],
+								   int32_t dfw[PART_LEN3],
+								   int32_t xfw[PART_LEN3],
+                                   CoherenceState* coherence_state,
+                                   short* filter_divergence_state,
+                                   int* extreme_filter_divergence) {
+  // Power estimate smoothing coefficients.
+  const long long* ptrGCoh =
+      extended_filter_enabled
+          ? WebRtcAec_kExtendedSmoothingCoefficients[mult - 1]
+          : WebRtcAec_kNormalSmoothingCoefficients[mult - 1];
+  int i;
+  long long sdSum = 0, seSum = 0, ltmp;
+  int COQ = 0;
+  int GQ = 13;
+  long long tmpe = ptrGCoh[1], tmpse, tmpd, tmpsd;
+  for (i = 0; i < PART_LEN1; i++) {
+    tmpd = (ptrGCoh[0] * coherence_state->sd[i]);
+    tmpsd = (((long long)dfw[2*i] * dfw[2*i]) + ((long long)dfw[2*i+1] * dfw[2*i+1]));
+    tmpsd = ptrGCoh[1] *tmpsd;
+    coherence_state->sd[i] =
+        ((ptrGCoh[0] * coherence_state->sd[i]) +
+        (ptrGCoh[1] * (((long long)dfw[2*i] * dfw[2*i]) + ((long long)dfw[2*i+1] * dfw[2*i+1]))))>>GQ;
+    coherence_state->se[i] =
+        ((ptrGCoh[0] * coherence_state->se[i]) +
+        (ptrGCoh[1] * (((long long)efw[2*i] * efw[2*i]) + ((long long)efw[2*i+1] * efw[2*i+1]))))>>GQ;
+
+
+    coherence_state->sx[i] =
+        ((ptrGCoh[0] * coherence_state->sx[i]) +
+        (ptrGCoh[1] *
+            WEBRTC_SPL_MAX(((long long)xfw[2*i] * xfw[2*i]) + ((long long)xfw[2*i+1] * xfw[2*i+1]),
+                           WebRtcAec_kMinFarendPSD)))>>GQ;
+
+    coherence_state->sde[i][0] =
+        ((ptrGCoh[0] * coherence_state->sde[i][0]) +
+        (ptrGCoh[1] * (((long long)dfw[2*i] * efw[2*i]) + ((long long)dfw[2*i+1] * efw[2*i+1]))))>>GQ;
+    coherence_state->sde[i][1] =
+        ((ptrGCoh[0] * coherence_state->sde[i][1]) +
+        (ptrGCoh[1] * (((long long)dfw[2*i] * efw[2*i+1]) - ((long long)dfw[2*i+1] * efw[2*i]))))>>GQ;
+
+    coherence_state->sxd[i][0] =
+        ((ptrGCoh[0] * coherence_state->sxd[i][0]) +
+        (ptrGCoh[1] * (((long long)dfw[2*i] * xfw[2*i]) + ((long long)dfw[2*i+1] * xfw[2*i+1]))))>>GQ;
+    coherence_state->sxd[i][1] =
+        ((ptrGCoh[0] * coherence_state->sxd[i][1]) +
+        (ptrGCoh[1] * (((long long)dfw[2*i] * xfw[2*i+1]) - ((long long)dfw[2*i+1] * xfw[2*i]))))>>GQ;
+
+    sdSum += coherence_state->sd[i];
+    seSum += coherence_state->se[i];
+  }
+
+  // Divergent filter safeguard update.
+  *filter_divergence_state =
+      (*filter_divergence_state ? 269 : 256) * seSum > (sdSum<<8);//1.05f : 1.0f
+
+  // Signal extreme filter divergence if the error is significantly larger
+  // than the nearend (13 dB).
+  *extreme_filter_divergence = ((seSum<<8) > (5107 * sdSum));//19.95f
+}
+#else
+static void UpdateCoherenceSpectra(int mult,
+                                   bool extended_filter_enabled,
+                                   int32_t efw[PART_LEN3],
+								   int32_t dfw[PART_LEN3],
+								   int32_t xfw[PART_LEN3],
+                                   CoherenceState* coherence_state,
+                                   short* filter_divergence_state,
+                                   int* extreme_filter_divergence) 
+{
+  // Power estimate smoothing coefficients.
+  const float* ptrGCoh =
+      extended_filter_enabled
+          ? fWebRtcAec_kExtendedSmoothingCoefficients[mult - 1]
+          : fWebRtcAec_kNormalSmoothingCoefficients[mult - 1];
+  int i;
+  float sdSum = 0, seSum = 0;
+long long tmpe, tmpse;
+  for (i = 0; i < PART_LEN1; i++) {
+    coherence_state->sd[i] =
+        ptrGCoh[0] * coherence_state->sd[i] +
+        ptrGCoh[1] * (((long long)dfw[2*i] * dfw[2*i]) + ((long long)dfw[2*i+1] * dfw[2*i+1]));
+    coherence_state->se[i] =
+        ptrGCoh[0] * coherence_state->se[i] +
+        ptrGCoh[1] * (((long long)efw[2*i] * efw[2*i]) + ((long long)efw[2*i+1] * efw[2*i+1]));
+        tmpe = ((long long)efw[2*i] * efw[2*i]) + ((long long)efw[2*i+1] * efw[2*i+1]);
+        tmpe = ptrGCoh[1] * tmpe;
+        tmpse = ptrGCoh[0] * coherence_state->se[i];
+    // We threshold here to protect against the ill-effects of a zero farend.
+    // The threshold is not arbitrarily chosen, but balances protection and
+    // adverse interaction with the algorithm's tuning.
+    // TODO(bjornv): investigate further why this is so sensitive.
+    coherence_state->sx[i] =
+        ptrGCoh[0] * coherence_state->sx[i] +
+        ptrGCoh[1] *
+            WEBRTC_SPL_MAX(((long long)xfw[2*i] * xfw[2*i]) + ((long long)xfw[2*i+1] * xfw[2*i+1]),
+                           WebRtcAec_kMinFarendPSD);
+
+    coherence_state->sde[i][0] =
+        ptrGCoh[0] * coherence_state->sde[i][0] +
+        ptrGCoh[1] * (((long long)dfw[2*i] * efw[2*i]) + ((long long)dfw[2*i+1] * efw[2*i+1]));
+    coherence_state->sde[i][1] =
+        ptrGCoh[0] * coherence_state->sde[i][1] +
+        ptrGCoh[1] * (((long long)dfw[2*i] * efw[2*i+1]) - ((long long)dfw[2*i+1] * efw[2*i]));
+
+    coherence_state->sxd[i][0] =
+        ptrGCoh[0] * coherence_state->sxd[i][0] +
+        ptrGCoh[1] * (((long long)dfw[2*i] * xfw[2*i]) + ((long long)dfw[2*i+1] * xfw[2*i+1]));
+    coherence_state->sxd[i][1] =
+        ptrGCoh[0] * coherence_state->sxd[i][1] +
+        ptrGCoh[1] * (((long long)dfw[2*i] * xfw[2*i+1]) - ((long long)dfw[2*i+1] * xfw[2*i]));
+
+    sdSum += coherence_state->sd[i];
+    seSum += coherence_state->se[i];
+  }
+
+  // Divergent filter safeguard update.
+  *filter_divergence_state =
+      (*filter_divergence_state ? 1.05f : 1.0f) * seSum > sdSum;
+
+  // Signal extreme filter divergence if the error is significantly larger
+  // than the nearend (13 dB).
+  *extreme_filter_divergence = (seSum > (19.95f * sdSum));
+}
+
+#endif
 // Window time domain data to be used by the fft.
  void WindowData(int32_t* x_windowed, int32_t* x) {
   int i;
@@ -1366,11 +1862,11 @@ static void UpdateCoherenceSpectra(int mult,
 }
 
 static void FormSuppressionGain(AecCore* aec,
-                                int cohde[PART_LEN1],//Q16
-                                int cohxd[PART_LEN1],//Q16
-                                int hNl[PART_LEN1]) {//Q16
+                                uint16_t cohde[PART_LEN1],//Q16
+                                uint16_t cohxd[PART_LEN1],//Q16
+                                uint16_t hNl[PART_LEN1]) {//Q16
   int hNlDeAvg, hNlXdAvg;
-  int hNlPref[kPrefBandSize];
+  uint16_t hNlPref[kPrefBandSize];
   int hNlFb = 0, hNlFbLow = 0;//Q16
   const int prefBandSize = kPrefBandSize / aec->mult;
   //const float prefBandQuant = 0.75f, prefBandQuantLow = 0.5f;
@@ -1435,8 +1931,8 @@ static void FormSuppressionGain(AecCore* aec,
       // Select an order statistic from the preferred bands.
       // TODO(peah): Using quicksort now, but a selection algorithm may be
       // preferred.
-      memcpy(hNlPref, &hNl[minPrefBand], sizeof(int) * prefBandSize);
-      qsort(hNlPref, prefBandSize, sizeof(int), CmpFloat);
+      memcpy(hNlPref, &hNl[minPrefBand], sizeof(hNl[0]) * prefBandSize);
+      qsort(hNlPref, prefBandSize, sizeof(hNl[0]), CmpFloat);
       hNlFb =
           hNlPref[(((prefBandSize - 1)*3)>>2)];
       hNlFbLow = hNlPref[((prefBandSize - 1)>>1)];
@@ -1498,8 +1994,8 @@ void EchoSuppression(
   size_t j;
 
   // Coherence and non-linear filter
-  int cohde[PART_LEN1], cohxd[PART_LEN1];//Q16
-  int hNl[PART_LEN1];
+  uint16_t cohde[PART_LEN1], cohxd[PART_LEN1];//Q16
+  uint16_t hNl[PART_LEN1];
 
   // Filter energy
   const int delayEstInterval = 10 * aec->mult;
@@ -1508,35 +2004,65 @@ void EchoSuppression(
   // Update eBuf with echo subtractor output.
   memcpy(aec->eBuf + PART_LEN, echo_subtractor_output,
          sizeof(int32_t) * PART_LEN);
-
+ if(NLP_enable){  
   // Analysis filter banks for the echo suppressor.
+  
   // Windowed near-end ffts.
   WindowData(fft, nearend_extended_block_lowest_band);//aecq0
 #ifdef HARD_FFT
-    hard_rfft_int32(0, fft, dfw_hifi);//hyli
+        #ifndef INT_MODE         
+        hard_rfft_int32(0, fft, dfw_hifi);//hyli
+        #else
+        hard_rfft_int32_INT(0, fft, dfw_hifi);
+        #endif
     #else
   //realFFT_forward(dfw_hifi, fft, 128);
   arm_rfft_q31(&S_fft128, fft, dfw_hifi);//hyli
   #endif
+  
   // Windowed echo suppressor output ffts.
   WindowData(fft, aec->eBuf);//aecq0
 #ifdef HARD_FFT
-    hard_rfft_int32(0, fft, efw_hifi);//hyli
+        #ifndef INT_MODE         
+        hard_rfft_int32(0, fft, efw_hifi);//hyli
+        #else
+        hard_rfft_int32_INT(0, fft, efw_hifi);
+        #endif
     #else
   //realFFT_forward(efw_hifi, fft, 128);
   arm_rfft_q31(&S_fft128, fft, efw_hifi);//hyli
   #endif
   // NLP
-
-  // Convert far-end partition to the frequency domain with windowing.
-  WindowData(fft, farend_extended_block);//aecq0
-  
-#ifdef HARD_FFT
-    hard_rfft_int32(0, fft, xfw_hifi);//hyli
-    #else
-  //realFFT_forward(xfw_hifi, fft, 128);
-  arm_rfft_q31(&S_fft128, fft, xfw_hifi);//hyli
-  #endif
+#if 0
+    int sum_zeron = 0;
+    for( i = 0; i < PART_LEN2; ++i)
+    {
+        if(abs(farend_extended_block[i])> 50)
+        {
+            break;
+        }
+        sum_zeron++;
+    }
+    if(sum_zeron == 128)
+    {
+        memset(xfw_hifi, 0, PART_LEN3*sizeof(int32_t));
+    }
+    else
+	#endif
+    {
+        // Convert far-end partition to the frequency domain with windowing.
+        WindowData(fft, farend_extended_block);//aecq0  
+        #ifdef HARD_FFT
+            #ifndef INT_MODE         
+            hard_rfft_int32(0, fft, xfw_hifi);//hyli
+            #else
+            hard_rfft_int32_INT(0, fft, xfw_hifi);
+            #endif
+        #else
+        //realFFT_forward(xfw_hifi, fft, 128);
+        arm_rfft_q31(&S_fft128, fft, xfw_hifi);//hyli
+        #endif
+    }
   
   // image part take conjunction for the result from core ooura_fft/fft_realf_ie are conjuncted
   for( i = 0; i < PART_LEN1; ++i)
@@ -1556,12 +2082,44 @@ void EchoSuppression(
     // Use delayed far.
      memcpy(xfw_hifi, aec->xfwBuf_hifi + aec->delayIdx * PART_LEN3,
             sizeof(xfw_hifi[0])  * PART_LEN3);
-
+}
+else
+{
+  int shifted = 0;
+  // Windowed echo suppressor output ffts.
+  WindowData(fft, aec->eBuf);//aecq0
+    #ifdef HARD_FFT
+        #ifndef INT_MODE         
+        hard_rfft_int32(0, fft, efw_hifi);//hyli
+        #else
+        hard_rfft_int32_INT(0, fft, efw_hifi);
+        #endif
+    #else
+  //realFFT_forward(efw_hifi, fft, 128);
+  arm_rfft_q31(&S_fft128, fft, efw_hifi);//hyli
+  #endif
+  // image part take conjunction for the result from core ooura_fft/fft_realf_ie are conjuncted
+  for( i = 0; i < PART_LEN1; ++i)
+    {
+	  efw_hifi[2*i + 1] = -efw_hifi[2*i + 1];
+    }   
+}            
+if(NLP_enable){  
+//t0 = osKernelGetTickCount();
+//for (int n = 0; n < 4*32; n++)
+{
   UpdateCoherenceSpectra(aec->mult, aec->extended_filter_enabled == 1,
                                       efw_hifi, dfw_hifi, xfw_hifi, &aec->coherence_state,
                                       &aec->divergeState,
                                       &aec->extreme_filter_divergence);
+}                                      
+//iet_printf_msg("UpdateCoherenceSpectra time =%d \r\n", osKernelGetTickCount()-t0);        
+//t0 = osKernelGetTickCount();
+//for (int n = 0; n < 4*32; n++)
+{
   ComputeCoherence(&aec->coherence_state, cohde, cohxd);
+}                                      
+//iet_printf_msg("ComputeCoherence time =%d \r\n", osKernelGetTickCount()-t0);  
 //printf("cycle=%d,\n",GETCLOCK()-t0);
     //t0=GETCLOCK();
   // Select the microphone signal as output if the filter is deemed to have
@@ -1569,8 +2127,13 @@ void EchoSuppression(
   if (aec->divergeState) {
  memcpy(efw_hifi, dfw_hifi, sizeof(efw_hifi[0]) *  PART_LEN3);
    }
+//t0 = osKernelGetTickCount();
+//for (int n = 0; n < 4*32; n++)
+{   
   FormSuppressionGain(aec, cohde, cohxd, hNl);
-
+}                                      
+//iet_printf_msg("FormSuppressionGain time =%d \r\n", osKernelGetTickCount()-t0);  
+ }
   //aec->data_dumper->DumpRaw("aec_nlp_gain", PART_LEN1, hNl);
   Suppress(hNl, efw_hifi);
   // Add comfort noise.
@@ -1578,7 +2141,11 @@ void EchoSuppression(
   //              aec->noisePow, hNl);
   // Inverse error fft.
   #ifdef HARD_FFT
-    hard_rfft_int32(1, efw_hifi, fft);//hyli
+    #ifndef INT_MODE         
+        hard_rfft_int32(1, efw_hifi, fft);//hyli
+        #else
+        hard_rfft_int32_INT(1, efw_hifi, fft);
+        #endif
     #else
   //realFFT_Inverse(fft, efw_hifi, 128);
   arm_rfft_q31(&S_ifft128, efw_hifi, fft);//hyli
@@ -1622,17 +2189,22 @@ void EchoSuppression(
   }
   #endif
   // Copy the current block to the old position.
+//t0 = osKernelGetTickCount();
+//for (int n = 0; n < 4*32; n++)
+{ 
   memcpy(aec->eBuf, aec->eBuf + PART_LEN, sizeof(int32_t) * PART_LEN);
-
+  if(NLP_enable){  
   int wlen = kExtendedNumPartitions * PART_LEN3 - PART_LEN3;
-  //memmove(aec->xfwBuf_hifi + PART_LEN3, aec->xfwBuf_hifi, sizeof(int32_t) * wlen);
- while(wlen--) 
- {
+  //memmove(aec->xfwBuf_hifi + PART_LEN3, aec->xfwBuf_hifi, wlen*sizeof(int32_t));
+    while(wlen--) 
+    {
       *(aec->xfwBuf_hifi + PART_LEN3 + wlen) = *(aec->xfwBuf_hifi + wlen);
-  }
+    }
   //memmove(aec->xfwBuf_hifi + PART_LEN3, aec->xfwBuf_hifi,
    //         sizeof(aec->xfwBuf_hifi) - sizeof(float) * PART_LEN3);
-
+  }
+ }                                      
+//iet_printf_msg("memmove time =%d \r\n", osKernelGetTickCount()-t0);   
 }
 
 #endif
@@ -1685,11 +2257,11 @@ void ProcessNearendBlock(
   // Convert far-end signal to the frequency domain.
   memcpy(fft, farend_extended_block_lowest_band, sizeof(int32_t) * PART_LEN2);
 //#ifdef HARD_FFT
-//    hard_rfft_int32(0, fft, farend_fft_hifi);//hyli
-//    #else
+    //hard_rfft_int32(0, fft, farend_fft_hifi);//hyli
+//#else
   //realFFT_forward(farend_fft_hifi, fft, 128);
   arm_rfft_q31(&S_fft128, fft, farend_fft_hifi);//hyli
-  //#endif
+//#endif
     // Power smoothing.
     int i;
     #if 0
@@ -1782,13 +2354,18 @@ void ProcessNearendBlock(
   #endif
 //#endif
   // Perform echo subtraction.
-
+#if 1
+//t0 = osKernelGetTickCount();
+//for (int n = 0; n < 4*32; n++)
+{
   EchoSubtraction(
           aec->num_partitions, aec->extended_filter_enabled,
           &aec->extreme_filter_divergence, aec->filter_step_size,
           aec->error_threshold, farend_fft_hifi, &aec->xfBufBlockPos, aec->xfBuf_hifi,
           &nearend_block[0][0], aec->xPow, aec->wfBuf_hifi, echo_subtractor_output);
-
+}
+//iet_printf_msg("EchoSubtraction time =%d \r\n", osKernelGetTickCount()-t0);          
+#endif
 #if 0
   if (aec->metricsMode == 1) {
     UpdateLevel(&aec->linoutlevel,
@@ -1797,11 +2374,91 @@ void ProcessNearendBlock(
 #endif
 
 
-
-
+#if 0
+if(aec->frame_count == 583)
+{
+    for(int j = 0; j < 64; j++)
+    {
+        printf("%d, ",echo_subtractor_output[j]);
+        if((j+1)%64==0)
+        {
+            printf("\n");
+        }
+    }
+    for(int j = 0; j < 65; j++)
+    {
+        printf("%lld, ",aec->coherence_state.sd[j]);
+        if((j+1)%65==0)
+        {
+            printf("\n");
+        }
+    }
+    for(int j = 0; j < 65; j++)
+    {
+        printf("%lld, ",aec->coherence_state.se[j]);
+        if((j+1)%65==0)
+        {
+            printf("\n");
+        }
+    }
+    for(int j = 0; j < 65; j++)
+    {
+        printf("%lld, ",aec->coherence_state.sx[j]);
+        if((j+1)%65==0)
+        {
+            printf("\n");
+        }
+    }
+    for(int j = 0; j < 65; j++)
+    {
+        printf("%lld, ",aec->coherence_state.sde[j][0]);
+        if((j+1)%65==0)
+        {
+            printf("\n");
+        }
+    }
+    for(int j = 0; j < 65; j++)
+    {
+        printf("%lld, ",aec->coherence_state.sde[j][1]);
+        if((j+1)%65==0)
+        {
+            printf("\n");
+        }
+    }
+    for(int j = 0; j < 65; j++)
+    {
+        printf("%lld, ",aec->coherence_state.sxd[j][0]);
+        if((j+1)%65==0)
+        {
+            printf("\n");
+        }
+    }
+    for(int j = 0; j < 65; j++)
+    {
+        printf("%lld, ",aec->coherence_state.sxd[j][1]);
+        if((j+1)%65==0)
+        {
+            printf("\n");
+        }
+    }
+    
+    for(int j = 0; j < 128; j++)
+    {
+        printf("%d, ",aec->eBuf[j]);
+        if((j+1)%64==0)
+        {
+            printf("\n");
+        }
+    }
+}
+#endif
+//t0 = osKernelGetTickCount();
+//for (int n = 0; n < 4*32; n++)
+{
   // Perform echo suppression.
-  //EchoSuppression(aec, nearend_extended_block_lowest_band,farend_extended_block_lowest_band, echo_subtractor_output,output_block);
-
+  EchoSuppression(aec, nearend_extended_block_lowest_band,farend_extended_block_lowest_band, echo_subtractor_output,output_block);
+}
+//iet_printf_msg("EchoSuppression time =%d \r\n", osKernelGetTickCount()-t0);
 #if 0
   if (aec->metricsMode == 1) {
     UpdateLevel(&aec->nlpoutlevel,
@@ -1811,7 +2468,7 @@ void ProcessNearendBlock(
 #endif
 
   // for HIFI disable NLP
-  #if 1
+  #if 0
   for (i = 0; i < PART_LEN; i++)
   {
     output_block[0][i] = echo_subtractor_output[i]>>(-aecq0);//aecsq
@@ -1957,7 +2614,7 @@ int WebRtcAec_InitAec(AecCore* aec, int sampFreq) {
 
   // Start the output buffer with zeros to be able to produce
   // a full output frame in the first frame.
-  aec->output_buffer_size = 48;//PART_LEN - (FRAME_LEN - PART_LEN);
+  aec->output_buffer_size = PART_LEN - (FRAME_LEN - PART_LEN);//48;//
   memset(&aec->output_buffer[0], 0, sizeof(aec->output_buffer));
   aec->nearend_buffer_size = 0;
   memset(&aec->nearend_buffer[0], 0, sizeof(aec->nearend_buffer));
@@ -2080,7 +2737,7 @@ int WebRtcAec_InitAec(AecCore* aec, int sampFreq) {
   aec->metricsMode = 0;
   //InitMetrics(aec);
   // Extended Filter// for 128/160ms
-  WebRtcAec_enable_extended_filter(aec, 1);
+  WebRtcAec_enable_extended_filter(aec, 1);//kNormalNumPartitions=12或4时，采用normal filter
   return 0;
 }
 

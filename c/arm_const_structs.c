@@ -79,7 +79,7 @@ const arm_cfft_instance_q31 arm_cfft_sR_q31_len32 = {
 const arm_cfft_instance_q31 arm_cfft_sR_q31_len64 = {
 	64, twiddleCoef_64_q31, armBitRevIndexTable_fixed_64, ARMBITREVINDEXTABLE_FIXED_64_TABLE_LENGTH
 };
-#if 0
+
 const arm_cfft_instance_q31 arm_cfft_sR_q31_len128 = {
 	128, twiddleCoef_128_q31, armBitRevIndexTable_fixed_128, ARMBITREVINDEXTABLE_FIXED_128_TABLE_LENGTH
 };
@@ -87,7 +87,7 @@ const arm_cfft_instance_q31 arm_cfft_sR_q31_len128 = {
 const arm_cfft_instance_q31 arm_cfft_sR_q31_len256 = {
 	256, twiddleCoef_256_q31, armBitRevIndexTable_fixed_256, ARMBITREVINDEXTABLE_FIXED_256_TABLE_LENGTH
 };
-
+#if 0
 const arm_cfft_instance_q31 arm_cfft_sR_q31_len512 = {
 	512, twiddleCoef_512_q31, armBitRevIndexTable_fixed_512, ARMBITREVINDEXTABLE_FIXED_512_TABLE_LENGTH
 };
