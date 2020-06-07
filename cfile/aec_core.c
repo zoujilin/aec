@@ -1553,7 +1553,7 @@ void EchoSubtraction(
     //e = &e_extended[PART_LEN];//
     // Compute the time-domain echo prediction error.
     for (i = 0; i < PART_LEN; ++i){
-        e[i] = y[i] - s[i];
+        e[i] = y[i] - s[i]; //y is nearend_block
     }
 
   // Compute the frequency domain echo prediction error.
